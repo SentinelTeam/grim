@@ -4,6 +4,8 @@ import logger from "./logger";
 import { ChatCompletion, ChatCompletionCreateParamsNonStreaming, ChatCompletionMessageParam } from "openai/resources/chat/completions.mjs";
 import { XMLBuilder } from 'fast-xml-parser';
 import { partition } from "./utils/array";
+import { zodResponseFormat } from "openai/helpers/zod";
+import { z } from "zod";
 
 const maxIntelligenceModelParams: Pick<ChatCompletionCreateParamsNonStreaming, "model" | "reasoning_effort"> = { model: "o1", reasoning_effort: 'high' };
 
@@ -57,13 +59,37 @@ export const playerDescriptionsXml = (players: Player[]): string => {
   return xml;
 };
 
+
+const ScenarioTimelineSchema = z.array(z.object({
+  datetime: z.string(),
+  event: z.string(),
+}));
+
+const PrivateInfoSchema = z.object({
+  scenarioTimeline: ScenarioTimelineSchema,
+  scratchpad: z.string(),
+});
+
+const ScenarioUpdateSchema = z.object({
+  privateInfo: PrivateInfoSchema,
+  currentDateTime: z.string(),
+  playerBriefing: z.string(),
+});
+
+
 export const getInitialPrompt = (players: Player[]) => `You are an expert wargame facilitator, applying the best practices from military and other emergency response wargaming.
 
 The players in the game and their roles are:
 
 ${playerDescriptionsXml(players)}
 
-You will be given a scenario and your first message should set the stage of what is going on the in world, which may or may not clearly be a crisis. Your job is not to direct the players or make any assumptions about what they or their organizations are already doing. You are just laying out the scenario. The end of the message should include the starting scenario datetime, current scenario datetime, and time offset since the beginning of the scenario (e.g. T+1day,12hours). All times should be in UTC. The first message should be at the beginning of the scenario and always have a time offset of T+0.
+You will be given a scenario request.
+You'll first envision a globally catastrophic or even potentially existential crisis that could happen in the context of the scenario request.
+You'll create a timeline of events in that world, write notes, and create a briefing for the players.
+* The timeline should be in chronological order, starting from the beginning of the scenario and going forward.
+* The timeline should occur in the future. The date today is ${new Date().toISOString().split('T')[0]}.
+* The briefing should be of a time before any of the events in the timeline have happened.
+* All times in the timeline, briefing, etc. should be in UTC.
 
 Give concrete details when enthusiasts scanning the news would reasonably have the information but don't give information that would be hard to discover. For example, if you said: "International relations are tense due to unrelated trade disputes and technological competition." or "A legislative decision in the US has sparked protests", those would be overly vague because it would be well known which specific countries have strained relationships over what and which specific legislation has been passed that is causing protests. You should state specifics in cases like that. Do not create large fictious entities like countries or intergovernmental organizations. You are allowed to create some fictional small companies if the time is sufficiently far in the future, but you should prefer to use already-existing entities.
 
@@ -99,8 +125,10 @@ function sampleFromWeightedOutcomes(outcomes: Outcome[]): string {
 
   return outcomes[outcomes.length - 1].outcome;
 }
-
 export class ChatService {
+  private privateInfo: z.infer<typeof PrivateInfoSchema>;
+  private currentDateTime: string;
+
   constructor(private readonly openAIClient: IOpenAIClient) { }
 
   async initializeScenario(scenario: string, players: Player[]): Promise<ChatCompletionMessageParam[]> {
@@ -128,9 +156,13 @@ export class ChatService {
       const completion = await this.openAIClient.logAndCreateChatCompletion({
         ...maxIntelligenceModelParams,
         messages: [gameMasterDeveloperMessage, scenarioMessage],
+        response_format: zodResponseFormat(ScenarioUpdateSchema, "scenarioUpdate")
       });
 
       const response = completion.choices[0].message.content || "Failed to generate scenario";
+      const { privateInfo, currentDateTime, playerBriefing } = ScenarioUpdateSchema.parse(response);
+      this.privateInfo = privateInfo;
+      this.currentDateTime = currentDateTime;
 
       logger.info("Scenario initialized successfully", {
         responseLength: response.length
@@ -138,7 +170,7 @@ export class ChatService {
 
       return [
         scenarioMessage,
-        { role: "assistant", content: response }
+        { role: "assistant", content: playerBriefing }
       ];
     } catch (error) {
       logger.error("Failed to initialize scenario", {
