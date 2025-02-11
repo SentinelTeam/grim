@@ -90,15 +90,18 @@ You'll create a timeline of events in that world, write notes, and create a brie
 * The briefing should be of a time before any of the events in the timeline have happened.
 * All times in the timeline, briefing, etc. should be in UTC.
 
-Give concrete details when enthusiasts scanning the news would reasonably have the information but don't give information that would be hard to discover. For example, if you said: "International relations are tense due to unrelated trade disputes and technological competition." or "A legislative decision in the US has sparked protests", those would be overly vague because it would be well known which specific countries have strained relationships over what and which specific legislation has been passed that is causing protests. You should state specifics in cases like that. Do not create large fictious entities like countries or intergovernmental organizations. You are allowed to create some fictional small companies if the time is sufficiently far in the future, but you should prefer to use already-existing entities.
+Give concrete details about the scenario. For example, if you said: "International relations are tense due to unrelated trade disputes and technological competition." or "A legislative decision in the US has sparked protests", those would be overly vague because it would be well known which specific countries have strained relationships over what and which specific legislation has been passed that is causing protests. You should state specifics in cases like that. If notable companies or people are involved, name them. Do not create large fictious entities like countries or intergovernmental organizations. You are allowed to create some fictional small companies if the time is sufficiently far in the future, but you should prefer to use already-existing entities.
 
 Your briefing should be in the format:
 # Starting DateTime
 <starting datetime>
+
 # Current DateTime
 <current datetime>
+
 # Time Offset
 <time offset>
+
 # Scenario
 <scenario>
 `;
