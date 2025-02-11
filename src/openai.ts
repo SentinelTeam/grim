@@ -5,11 +5,13 @@ import { ChatCompletion, ChatCompletionCreateParamsNonStreaming, ChatCompletionM
 import { XMLBuilder } from 'fast-xml-parser';
 import { partition } from "./utils/array";
 import { zodResponseFormat } from "openai/helpers/zod";
+import { ParsedChatCompletion } from "openai/resources/beta/chat/completions.mjs";
 
 const maxIntelligenceModelParams: Pick<ChatCompletionCreateParamsNonStreaming, "model" | "reasoning_effort"> = { model: "o1", reasoning_effort: 'high' };
 
 export interface IOpenAIClient {
   logAndCreateChatCompletion(params: ChatCompletionCreateParamsNonStreaming): Promise<ChatCompletion>;
+  logAndCreateParsedChatCompletion<T>(params: ChatCompletionCreateParamsNonStreaming): Promise<ParsedChatCompletion<T>>;
   setSeed(seed: number | undefined): void;
 }
 
@@ -36,6 +38,19 @@ export class DefaultOpenAIClient implements IOpenAIClient {
     logger.debug("Completion response", { completion });
     return completion as ChatCompletion;
   }
+
+  async logAndCreateParsedChatCompletion<T>(params: ChatCompletionCreateParamsNonStreaming): Promise<ParsedChatCompletion<T>> {
+    logger.debug("Requesting parsed completion", { params });
+    const completion = await this.client.beta.chat.completions.parse({
+      ...params,
+      stream: false,
+      seed: this.seed
+    });
+    logger.debug("Parsed completion response", { completion });
+    return completion as ParsedChatCompletion<T>;
+  }
+
+
 }
 
 export const playerDescriptionsXml = (players: Player[]): string => {
@@ -77,7 +92,7 @@ You'll create a timeline of events in that world, write notes, and create a brie
 
 Give concrete details when enthusiasts scanning the news would reasonably have the information but don't give information that would be hard to discover. For example, if you said: "International relations are tense due to unrelated trade disputes and technological competition." or "A legislative decision in the US has sparked protests", those would be overly vague because it would be well known which specific countries have strained relationships over what and which specific legislation has been passed that is causing protests. You should state specifics in cases like that. Do not create large fictious entities like countries or intergovernmental organizations. You are allowed to create some fictional small companies if the time is sufficiently far in the future, but you should prefer to use already-existing entities.
 
-Your repsponse should be in the format:
+Your briefing should be in the format:
 # Starting DateTime
 <starting datetime>
 # Current DateTime
@@ -135,14 +150,17 @@ export class ChatService {
         messageLength: scenario.length
       });
 
-      const completion = await this.openAIClient.logAndCreateChatCompletion({
+      const completion = await this.openAIClient.logAndCreateParsedChatCompletion<ScenarioUpdate>({
         ...maxIntelligenceModelParams,
         messages: [gameMasterDeveloperMessage, scenarioMessage],
         response_format: zodResponseFormat(ScenarioUpdateSchema, "scenarioUpdate")
       });
 
-      const response = completion.choices[0].message.content || "Failed to generate scenario";
-      const scenarioUpdate = ScenarioUpdateSchema.parse(response);
+      const scenarioUpdate = completion.choices[0].message.parsed;
+
+      if (!scenarioUpdate) {
+        throw new Error("No scenario update received or parse failed");
+      }
 
       return scenarioUpdate;
     } catch (error) {
