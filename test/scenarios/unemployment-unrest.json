@@ -10,10 +10,11 @@
     }
   ],
   "scenarioTopic": "Social unrest due to unemployment from AI.",
-  "actions": [
-    {
-      "type": "ACTION",
-      "player": {
+  "actionRounds": [
+    [
+      {
+        "type": "ACTION",
+        "player": {
         "name": "Rai",
         "role": "Head of Emergency Response"
       },
@@ -41,7 +42,26 @@
         "name": "Nuño",
         "role": "Head of Foresight"
       },
-      "content": "1 hour of messaging with friends and family about finding shelf-stable food, water, and being ready to shelter in place."
-    }
+        "content": "1 hour of messaging with friends and family about finding shelf-stable food, water, and being ready to shelter in place."
+      }
+    ],
+    [
+      {
+        "type": "ACTION",
+        "player": {
+          "name": "Rai",
+          "role": "Head of Emergency Response"
+        },
+        "content": "30 minutes of ordering emergency supplies for the office."
+      },
+      {
+        "type": "ACTION",
+        "player": {
+          "name": "Nuño",
+          "role": "Head of Foresight"
+        },
+        "content": "1 hour of messaging with contacts in government to determine if they are aware of the situation."
+      }
+    ]
   ]
 }

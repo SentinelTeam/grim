@@ -8,7 +8,7 @@ import logger from '../src/logger';
 interface ScenarioFile {
   players: Player[];
   scenarioTopic: string;
-  actions: UserInteraction[];
+  actionRounds: UserInteraction[][];
 }
 
 async function runScenario(scenarioPath: string) {
@@ -46,31 +46,50 @@ async function runScenario(scenarioPath: string) {
     );
 
     // Log initial state
-    logger.info('Initial scenario state:', {
-      playerBriefing,
-      privateInfo: rootState.state.privateInfo
-    });
-
-    // Process actions
-    const { newState, response } = await gameStateManager.processActions(
-      rootState,
-      scenarioData.actions
-    );
-
-    // Output results
     logger.info(
-      'Final results:\n' +
+      'Initial state:\n' +
       'Messages:\n' +
-      newState.state.canon.map((msg, i) => `[${i + 1}] ${msg.role}: ${msg.content}`).join('\n') +
+      rootState.state.canon.map((msg, i) => `[${i + 1}] ${msg.role}: ${msg.content}`).join('\n') +
       '\n\nPrivate Information:\n' +
-      `Current time: ${newState.state.privateInfo.currentDateTime}\n` +
+      `Current time: ${rootState.state.privateInfo.currentDateTime}\n` +
       'Timeline:\n' +
-      newState.state.privateInfo.scenarioTimeline.map((event, i) => 
+      rootState.state.privateInfo.scenarioTimeline.map((event, i) =>
         `${event.datetime}: ${event.event}`
       ).join('\n') +
       '\n\nScratchpad:\n' +
-      newState.state.privateInfo.scratchpad
+      rootState.state.privateInfo.scratchpad
     );
+
+    let currentState = rootState;
+
+    // Process each round of actions
+    for (let roundIndex = 0; roundIndex < scenarioData.actionRounds.length; roundIndex++) {
+      const actions = scenarioData.actionRounds[roundIndex];
+      logger.info(`Processing round ${roundIndex + 1}...`);
+
+      // Process actions for this round
+      const { newState, response } = await gameStateManager.processActions(
+        currentState,
+        actions
+      );
+
+      currentState = newState;
+
+      // Output results for this round
+      logger.info(
+        `Round ${roundIndex + 1} results:\n` +
+        'Messages:\n' +
+        currentState.state.canon.map((msg, i) => `[${i + 1}] ${msg.role}: ${msg.content}`).join('\n') +
+        '\n\nPrivate Information:\n' +
+        `Current time: ${currentState.state.privateInfo.currentDateTime}\n` +
+        'Timeline:\n' +
+        currentState.state.privateInfo.scenarioTimeline.map((event, i) => 
+          `${event.datetime}: ${event.event}`
+        ).join('\n') +
+        '\n\nScratchpad:\n' +
+        currentState.state.privateInfo.scratchpad
+      );
+    }
 
   } catch (error) {
     logger.error('Error running scenario:', error);
