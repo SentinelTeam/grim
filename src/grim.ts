@@ -1,32 +1,14 @@
-import { Bot, Context, session, SessionFlavor, Middleware } from "grammy";
+import { Bot, Context, session, SessionFlavor } from "grammy";
 import { config } from "dotenv";
 import { ChatService, DefaultOpenAIClient } from "./openai";
 import logger from "./logger";
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
-import crypto from 'crypto';
-import { Player, PrivateInfo, UserInteraction, UserInteractionType } from "./types";
+import { Player, UserInteraction, UserInteractionType } from "./types";
 import { ChatCompletionMessageParam } from "openai/resources/index.mjs";
+import { GameStateManager, ScenarioStateNode, ScenarioStateRoot } from "./game-state";
 
 config();
-
-interface ScenarioState {
-  canon: Array<ChatCompletionMessageParam>;
-  privateInfo: PrivateInfo;
-}
-
-type ScenarioStateNode = ScenarioStateRoot | ScenarioStateChild
-
-interface ScenarioStateRoot {
-  state: ScenarioState;
-  stateHash: string;
-  children: ScenarioStateChild[];
-}
-
-interface ScenarioStateChild extends ScenarioStateRoot {
-  parent: ScenarioStateChild | ScenarioStateRoot;
-}
-
 
 type InactiveGrimState = {
   playing: false;
@@ -41,8 +23,6 @@ type ActiveGrimState = {
 
 type GrimState = { players: Player[] } & (InactiveGrimState | ActiveGrimState);
 
-
-
 type SessionData = { grimState: GrimState };
 
 type BotContext = Context & SessionFlavor<SessionData>;
@@ -52,27 +32,7 @@ const bot = new Bot<BotContext>(process.env.TELEGRAM_BOT_TOKEN || "");
 
 const openAIClient = new DefaultOpenAIClient(process.env.OPENAI_API_KEY || "");
 const openAIService = new ChatService(openAIClient);
-
-// Helper function to generate hash for scenario state
-const generateStateHash = (state: ScenarioState): string => {
-  const stateString = JSON.stringify(state);
-  return crypto.createHash('sha256').update(stateString).digest('hex').slice(0, 8);
-};
-
-const createScenarioStateRoot = (state: ScenarioState): ScenarioStateRoot => {
-  return {
-    state,
-    stateHash: generateStateHash(state),
-    children: []
-  };
-};
-
-const createScenarioStateChildNode = (state: ScenarioState, parent: ScenarioStateNode): ScenarioStateChild => {
-  return {
-    ...createScenarioStateRoot(state),
-    parent
-  };
-};
+const gameStateManager = new GameStateManager(openAIService);
 
 const reply = async (ctx: BotContext, message: string) => {
   return ctx.reply(message);
@@ -139,7 +99,6 @@ const requireNoScenario = (ctx: BotContext): boolean => {
   }
   return true;
 };
-
 
 // Help command
 bot.command("help", async (ctx) => {
@@ -260,12 +219,7 @@ scenarioCommands
       });
 
       const players = ctx.session.grimState.players;
-      const { privateInfo, currentDateTime, playerBriefing } = await openAIService.initializeScenario(scenarioText, players);
-
-      const rootState = createScenarioStateRoot({
-        canon: [{ role: "assistant", content: playerBriefing }],
-        privateInfo
-      });
+      const { rootState, playerBriefing } = await gameStateManager.initializeScenario(scenarioText, players);
 
       ctx.session.grimState = {
         playing: true,
@@ -396,7 +350,6 @@ gameCommands.command("remove", async (ctx) => {
   await reply(ctx, `Removed item #${index} from the queue.\n\nCurrent queue: \n${formatQueue(grimState.pendingUserInteractions)}`);
 });
 
-
 // Process command
 gameCommands.command("process", async (ctx) => {
   const grimState = ctx.session.grimState as ActiveGrimState;
@@ -407,37 +360,13 @@ gameCommands.command("process", async (ctx) => {
   await reply(ctx, "Processing actions… Please don't add any more actions until the response arrives.");
 
   try {
-    const processActionsResult = await openAIService.processActions(
-      grimState.currentState.state.canon,
-      grimState.pendingUserInteractions,
+    const { newState, response } = await gameStateManager.processActions(
+      grimState.currentState,
+      grimState.pendingUserInteractions
     );
 
-    const assistantResponse = processActionsResult[processActionsResult.length - 1];
-
-
-    const formattedUserInteractionMessage = grimState.pendingUserInteractions.map(action => {
-      switch (action.type) {
-        case 'ACTION':
-          return `ACTION ${action.player.name}: ${action.content}`;
-        default:
-          return `${action.type}: ${action.content}`;
-      }
-    }).join("\n");
-
-    const newScenarioState = createScenarioStateChildNode(
-      {
-        canon: [...grimState.currentState.state.canon, { role: 'user', content: formattedUserInteractionMessage }, assistantResponse],
-        // TODO: update private info once process actually does that
-        privateInfo: grimState.currentState.state.privateInfo
-      },
-      grimState.currentState
-    );
-
-    grimState.currentState = newScenarioState;
-
-    logger.info("Canonical scenario messages", grimState.currentState.state.canon);
-
-    await sendChunkedReply(ctx, assistantResponse.content as string);
+    grimState.currentState = newState;
+    await sendChunkedReply(ctx, response);
     await reply(ctx, `State saved with hash:`);
     await reply(ctx, grimState.currentState.stateHash);
 
@@ -459,16 +388,7 @@ gameCommands.command("rollback", async (ctx) => {
   }
 
   const grimState = ctx.session.grimState as ActiveGrimState;
-
-  const findNodeByHash = (node: ScenarioStateNode, hash: string): ScenarioStateNode | undefined => {
-    if (node.stateHash === hash) return node;
-    return node.children.reduce<ScenarioStateNode | undefined>(
-      (found, child) => found || findNodeByHash(child, hash),
-      undefined
-    );
-  };
-
-  const scenarioStateNodeSearchResult = findNodeByHash(grimState.rootState, targetHash);
+  const scenarioStateNodeSearchResult = gameStateManager.findNodeByHash(grimState.rootState, targetHash);
   if (!scenarioStateNodeSearchResult) {
     await reply(ctx, "Invalid state hash. Please provide a valid hash from a previous state.");
     return;

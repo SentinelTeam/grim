@@ -1,5 +1,6 @@
 import { ChatService, DefaultOpenAIClient } from '../src/openai';
-import { Player, UserInteraction, ScenarioState } from '../src/types';
+import { Player, UserInteraction } from '../src/types';
+import { GameStateManager } from '../src/game-state';
 import * as fs from 'fs';
 import * as path from 'path';
 import logger from '../src/logger';
@@ -34,52 +35,41 @@ async function runScenario(scenarioPath: string) {
   const SEED = 42;
   const openAIClient = new DefaultOpenAIClient(process.env.OPENAI_API_KEY || "", SEED);
   const openAIService = new ChatService(openAIClient);
+  const gameStateManager = new GameStateManager(openAIService);
 
   try {
     // Initialize scenario
     logger.info('Initializing scenario...');
-    const scenarioUpdate = await openAIService.initializeScenario(
+    const { rootState, playerBriefing } = await gameStateManager.initializeScenario(
       scenarioData.scenarioTopic,
       scenarioData.players
     );
 
-    // Create initial state
-    const initialState: ScenarioState = {
-      canon: [{
-        role: 'assistant',
-        content: scenarioUpdate.playerBriefing
-      }],
-      privateInfo: scenarioUpdate.privateInfo
-    };
-
     // Log initial state
     logger.info('Initial scenario state:', {
-      playerBriefing: scenarioUpdate.playerBriefing,
-      privateInfo: scenarioUpdate.privateInfo
+      playerBriefing,
+      privateInfo: rootState.state.privateInfo
     });
 
     // Process actions
-    logger.info('Processing actions...');
-    const result = await openAIService.processActions(
-      initialState.canon,
+    const { newState, response } = await gameStateManager.processActions(
+      rootState,
       scenarioData.actions
     );
-
-    // TODO: update state with result
 
     // Output results
     logger.info(
       'Final results:\n' +
       'Messages:\n' +
-      result.map((msg, i) => `[${i + 1}] ${msg.role}: ${msg.content}`).join('\n') +
+      newState.state.canon.map((msg, i) => `[${i + 1}] ${msg.role}: ${msg.content}`).join('\n') +
       '\n\nPrivate Information:\n' +
-      `Current time: ${initialState.privateInfo.currentDateTime}\n` +
+      `Current time: ${newState.state.privateInfo.currentDateTime}\n` +
       'Timeline:\n' +
-      initialState.privateInfo.scenarioTimeline.map((event, i) => 
-        `[${i + 1}] ${event.datetime}: ${event.event}`
+      newState.state.privateInfo.scenarioTimeline.map((event, i) => 
+        `${event.datetime}: ${event.event}`
       ).join('\n') +
       '\n\nScratchpad:\n' +
-      initialState.privateInfo.scratchpad
+      newState.state.privateInfo.scratchpad
     );
 
   } catch (error) {
