@@ -1,7 +1,8 @@
 import { ChatService, DefaultOpenAIClient } from '../src/openai';
-import { Player, UserInteraction } from '../src/types';
+import { Player, UserInteraction, ScenarioState } from '../src/types';
 import * as fs from 'fs';
 import * as path from 'path';
+import logger from '../src/logger';
 
 interface ScenarioFile {
   players: Player[];
@@ -36,35 +37,56 @@ async function runScenario(scenarioPath: string) {
 
   try {
     // Initialize scenario
-    console.log('Initializing scenario...');
-    const scenarioHistory = await openAIService.initializeScenario(
+    logger.info('Initializing scenario...');
+    const scenarioUpdate = await openAIService.initializeScenario(
       scenarioData.scenarioTopic,
       scenarioData.players
     );
 
-    // Convert scenario history to message array format
-    const scenarioMessages = [{
-      role: 'assistant',
-      content: JSON.stringify(scenarioHistory)
-    }];
+    // Create initial state
+    const initialState: ScenarioState = {
+      canon: [{
+        role: 'assistant',
+        content: scenarioUpdate.playerBriefing
+      }],
+      privateInfo: scenarioUpdate.privateInfo
+    };
+
+    // Log initial state
+    logger.info('Initial scenario state:', {
+      playerBriefing: scenarioUpdate.playerBriefing,
+      privateInfo: scenarioUpdate.privateInfo
+    });
 
     // Process actions
-    console.log('Processing actions...');
-    const result = await openAIService.processActions(scenarioMessages, scenarioData.actions);
+    logger.info('Processing actions...');
+    const result = await openAIService.processActions(
+      initialState.canon,
+      scenarioData.actions
+    );
+
+    // TODO: update state with result
 
     // Output results
-    console.log('\nResults:');
-    console.log('=========\n');
-    for (const message of result) {
-      console.log(`Role: ${message.role}`);
-      console.log(`Content: ${message.content}`);
-      console.log('=========\n');
-    }
+    logger.info(
+      'Final results:\n' +
+      'Messages:\n' +
+      result.map((msg, i) => `[${i + 1}] ${msg.role}: ${msg.content}`).join('\n') +
+      '\n\nPrivate Information:\n' +
+      `Current time: ${initialState.privateInfo.currentDateTime}\n` +
+      'Timeline:\n' +
+      initialState.privateInfo.scenarioTimeline.map((event, i) => 
+        `[${i + 1}] ${event.datetime}: ${event.event}`
+      ).join('\n') +
+      '\n\nScratchpad:\n' +
+      initialState.privateInfo.scratchpad
+    );
+
   } catch (error) {
-    console.error('Error running scenario:', error);
+    logger.error('Error running scenario:', error);
     process.exit(1);
   }
 }
 
 // Run the scenario with the file path from command line arguments
-runScenario(process.argv[2]); 
+runScenario(process.argv[2]);
