@@ -19,7 +19,7 @@ interface ScenarioState {
 interface SessionData {
   roleAssignments: Map<number, Player>;
   scenarioState: ScenarioState;
-  actionQueue: UserInteraction[];
+  userInteractionQueue: UserInteraction[];
   scenarioCheckpoints: Map<string, ScenarioState>;
 }
 
@@ -81,7 +81,7 @@ bot.use(session({
       isActive: false,
       messages: []
     },
-    actionQueue: [],
+    userInteractionQueue: [],
     scenarioCheckpoints: new Map()
   })
 }));
@@ -282,7 +282,7 @@ gameCommands.command("info", async (ctx) => {
   }
 
   const player = ctx.session.roleAssignments.get(ctx.from?.id!)!;
-  ctx.session.actionQueue.push({
+  ctx.session.userInteractionQueue.push({
     type: UserInteractionType.INFO,
     player,
     content: message
@@ -292,7 +292,7 @@ gameCommands.command("info", async (ctx) => {
     ctx,
     "Information request queued. Use /process to process all pending actions. Use /remove <number> to remove an item from the queue.\n\n" +
     "Current queue:\n" +
-    formatQueue(ctx.session.actionQueue)
+    formatQueue(ctx.session.userInteractionQueue)
   );
 });
 
@@ -305,7 +305,7 @@ gameCommands.command("feed", async (ctx) => {
   }
 
   const player = ctx.session.roleAssignments.get(ctx.from?.id!)!;
-  ctx.session.actionQueue.push({
+  ctx.session.userInteractionQueue.push({
     type: UserInteractionType.FEED,
     player,
     content: message
@@ -314,7 +314,7 @@ gameCommands.command("feed", async (ctx) => {
   await reply(ctx,
     "Information feed queued. Use /process to process all pending actions.\n\n" +
     "Current queue:\n" +
-    formatQueue(ctx.session.actionQueue)
+    formatQueue(ctx.session.userInteractionQueue)
   );
 });
 
@@ -327,7 +327,7 @@ gameCommands.command("action", async (ctx) => {
   }
 
   const player = ctx.session.roleAssignments.get(ctx.from?.id!)!;
-  ctx.session.actionQueue.push({
+  ctx.session.userInteractionQueue.push({
     type: UserInteractionType.ACTION,
     player,
     content: message
@@ -336,7 +336,7 @@ gameCommands.command("action", async (ctx) => {
   await reply(ctx,
     "Action queued. Use /process to process all pending actions.\n\n" +
     "Current queue:\n" +
-    formatQueue(ctx.session.actionQueue)
+    formatQueue(ctx.session.userInteractionQueue)
   );
 });
 
@@ -349,19 +349,19 @@ gameCommands.command("remove", async (ctx) => {
   }
 
   const index = parseInt(param, 10);
-  if (Number.isNaN(index) || index < 1 || index > ctx.session.actionQueue.length) {
+  if (Number.isNaN(index) || index < 1 || index > ctx.session.userInteractionQueue.length) {
     await reply(ctx, "Invalid item number.");
     return;
   }
 
-  ctx.session.actionQueue = ctx.session.actionQueue.filter((_, i) => i !== (index - 1));
-  await reply(ctx, `Removed item #${index} from the queue.\n\nCurrent queue: \n${formatQueue(ctx.session.actionQueue)}`);
+  ctx.session.userInteractionQueue = ctx.session.userInteractionQueue.filter((_, i) => i !== (index - 1));
+  await reply(ctx, `Removed item #${index} from the queue.\n\nCurrent queue: \n${formatQueue(ctx.session.userInteractionQueue)}`);
 });
 
 
 // Process command
 gameCommands.command("process", async (ctx) => {
-  if (ctx.session.actionQueue.length === 0) {
+  if (ctx.session.userInteractionQueue.length === 0) {
     await reply(ctx, "No actions to process.");
     return;
   }
@@ -370,13 +370,13 @@ gameCommands.command("process", async (ctx) => {
   try {
     const processActionsResult = await openAIService.processActions(
       ctx.session.scenarioState.messages,
-      ctx.session.actionQueue,
+      ctx.session.userInteractionQueue,
     );
 
     const lastMessage = processActionsResult[processActionsResult.length - 1];
 
 
-    const formattedMessages = ctx.session.actionQueue.map(action => {
+    const formattedMessages = ctx.session.userInteractionQueue.map(action => {
       switch (action.type) {
         case 'ACTION':
           return `ACTION ${action.player.name}: ${action.content}`;
@@ -400,7 +400,7 @@ gameCommands.command("process", async (ctx) => {
     await reply(ctx, hash);
 
     // Clear the queue after successful processing
-    ctx.session.actionQueue = [];
+    ctx.session.userInteractionQueue = [];
 
   } catch (error) {
     logger.error("Failed to process actions", { error });
