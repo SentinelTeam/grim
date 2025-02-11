@@ -1,0 +1,5 @@
+---
+description: How to express parameters
+globs: 
+---
+For constructors and functions with more than 2 parameters, instead of positional parameters, use a `…Params` object as the parameter so it's clearer what is happening at the function/constructor callsite.

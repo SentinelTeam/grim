@@ -1,0 +1,5 @@
+---
+description: Dependency injection for cleaner testing
+globs: 
+---
+Make sure classes have their side-effecting functionality passed in as a parameter so that mocking these results is easier when testing.
