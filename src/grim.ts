@@ -5,23 +5,45 @@ import logger from "./logger";
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import crypto from 'crypto';
-import { Player, UserInteraction, UserInteractionType } from "./types";
+import { Player, PrivateInfo, UserInteraction, UserInteractionType } from "./types";
 import { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 
 config();
 
 interface ScenarioState {
-  isActive: boolean;
-  messages: Array<ChatCompletionMessageParam>;
+  canon: Array<ChatCompletionMessageParam>;
+  privateInfo: PrivateInfo;
+}
+
+type ScenarioStateNode = ScenarioStateRoot | ScenarioStateChild
+
+interface ScenarioStateRoot {
+  state: ScenarioState;
+  stateHash: string;
+  children: ScenarioStateChild[];
+}
+
+interface ScenarioStateChild extends ScenarioStateRoot {
+  parent: ScenarioStateChild | ScenarioStateRoot;
 }
 
 
-interface SessionData {
-  roleAssignments: Map<number, Player>;
-  scenarioState: ScenarioState;
-  userInteractionQueue: UserInteraction[];
-  scenarioCheckpoints: Map<string, ScenarioState>;
+type InactiveGrimState = {
+  playing: false;
 }
+
+type ActiveGrimState = {
+  playing: true;
+  pendingUserInteractions: UserInteraction[];
+  rootState: ScenarioStateRoot;
+  currentState: ScenarioStateNode;
+}
+
+type GrimState = { players: Player[] } & (InactiveGrimState | ActiveGrimState);
+
+
+
+type SessionData = { grimState: GrimState };
 
 type BotContext = Context & SessionFlavor<SessionData>;
 
@@ -37,11 +59,19 @@ const generateStateHash = (state: ScenarioState): string => {
   return crypto.createHash('sha256').update(stateString).digest('hex').slice(0, 8);
 };
 
-// Helper function to save current state
-const saveState = (ctx: BotContext) => {
-  const hash = generateStateHash(ctx.session.scenarioState);
-  ctx.session.scenarioCheckpoints.set(hash, JSON.parse(JSON.stringify(ctx.session.scenarioState)));
-  return hash;
+const createScenarioStateRoot = (state: ScenarioState): ScenarioStateRoot => {
+  return {
+    state,
+    stateHash: generateStateHash(state),
+    children: []
+  };
+};
+
+const createScenarioStateChildNode = (state: ScenarioState, parent: ScenarioStateNode): ScenarioStateChild => {
+  return {
+    ...createScenarioStateRoot(state),
+    parent
+  };
 };
 
 const reply = async (ctx: BotContext, message: string) => {
@@ -66,8 +96,8 @@ const chunkText = (text: string, maxLength: number): string[] => {
 };
 
 // Helper function to send chunked replies
-const sendChunkedReply = async (ctx: BotContext, content: string) => {
-  const chunks = chunkText(content, 4096);
+const sendChunkedReply = async (ctx: BotContext, text: string) => {
+  const chunks = chunkText(text, 4096);
   for (const chunk of chunks) {
     await reply(ctx, chunk);
   }
@@ -76,20 +106,17 @@ const sendChunkedReply = async (ctx: BotContext, content: string) => {
 // Initialize session storage
 bot.use(session({
   initial: (): SessionData => ({
-    roleAssignments: new Map(),
-    scenarioState: {
-      isActive: false,
-      messages: []
-    },
-    userInteractionQueue: [],
-    scenarioCheckpoints: new Map()
+    grimState: {
+      playing: false,
+      players: [],
+    }
   })
 }));
 
 // Middleware to check if user has a role
 const requireRole = (ctx: BotContext): boolean => {
   const userId = ctx.from?.id;
-  if (!userId || !ctx.session.roleAssignments.has(userId)) {
+  if (!userId || !ctx.session.grimState.players.find(p => p.id === userId)) {
     reply(ctx, "You need to select a role first using /role`");
     return false;
   }
@@ -98,7 +125,7 @@ const requireRole = (ctx: BotContext): boolean => {
 
 // Middleware to check if scenario is active
 const requireScenario = (ctx: BotContext): boolean => {
-  if (!ctx.session.scenarioState.isActive) {
+  if (!ctx.session.grimState.playing) {
     reply(ctx, "No active scenario. Start one using /scenario first");
     return false;
   }
@@ -107,7 +134,7 @@ const requireScenario = (ctx: BotContext): boolean => {
 
 // Middleware to check if scenario is NOT active
 const requireNoScenario = (ctx: BotContext): boolean => {
-  if (ctx.session.scenarioState.isActive) {
+  if (ctx.session.grimState.playing) {
     return false;
   }
   return true;
@@ -131,7 +158,7 @@ bot.command("help", async (ctx) => {
     "/rollback - Roll back the scenario to a previous checkpoint"
   ];
 
-  const hasRole = ctx.from && ctx.session.roleAssignments.has(ctx.from.id);
+  const hasRole = ctx.from && ctx.session.grimState.players.find(p => p.id === ctx.from?.id);
   const availableCommands = [...baseCommands, ...(hasRole ? scenarioCommands : [])];
 
   await reply(ctx, "Available commands:\n" + availableCommands.join("\n"));
@@ -184,7 +211,7 @@ bot.command("role", async (ctx) => {
   };
 
   // Assign role to user
-  ctx.session.roleAssignments.set(player.id, player);
+  ctx.session.grimState.players.push(player);
   await reply(ctx, `@${ctx.from?.username} is now ${name} (${role})`);
 });
 
@@ -232,23 +259,30 @@ scenarioCommands
         scenarioLength: scenarioText.length
       });
 
-      const players = Array.from(ctx.session.roleAssignments.values());
-      const messages = await openAIService.initializeScenario(scenarioText, players);
+      const players = ctx.session.grimState.players;
+      const { privateInfo, currentDateTime, playerBriefingMessage } = await openAIService.initializeScenario(scenarioText, players);
 
-      ctx.session.scenarioState.isActive = true;
-      ctx.session.scenarioState.messages = messages;
+      const rootState = createScenarioStateRoot({
+        canon: [playerBriefingMessage],
+        privateInfo
+      });
 
-      const hash = saveState(ctx);
+      ctx.session.grimState = {
+        playing: true,
+        players,
+        pendingUserInteractions: [],
+        rootState,
+        currentState: rootState
+      };
 
-      await sendChunkedReply(ctx, messages[messages.length - 1].content as string);
+      await sendChunkedReply(ctx, playerBriefingMessage.content);
       await reply(ctx, "Initial state saved with hash:");
-      await reply(ctx, hash);
+      await reply(ctx, ctx.session.grimState.currentState.stateHash);
 
       logger.info("Scenario started successfully", {
         userId: ctx.from?.id,
         username: ctx.from?.username,
-        messageCount: messages.length,
-        initialStateHash: hash
+        initialStateHash: ctx.session.grimState.currentState.stateHash
       });
     } catch (error) {
       logger.error("Failed to initialize scenario", {
@@ -281,8 +315,9 @@ gameCommands.command("info", async (ctx) => {
     return;
   }
 
-  const player = ctx.session.roleAssignments.get(ctx.from?.id!)!;
-  ctx.session.userInteractionQueue.push({
+  const player = ctx.session.grimState.players.find(p => p.id === ctx.from?.id)!;
+  const grimState = ctx.session.grimState as ActiveGrimState;
+  grimState.pendingUserInteractions.push({
     type: UserInteractionType.INFO,
     player,
     content: message
@@ -292,7 +327,7 @@ gameCommands.command("info", async (ctx) => {
     ctx,
     "Information request queued. Use /process to process all pending actions. Use /remove <number> to remove an item from the queue.\n\n" +
     "Current queue:\n" +
-    formatQueue(ctx.session.userInteractionQueue)
+    formatQueue(grimState.pendingUserInteractions)
   );
 });
 
@@ -304,8 +339,9 @@ gameCommands.command("feed", async (ctx) => {
     return;
   }
 
-  const player = ctx.session.roleAssignments.get(ctx.from?.id!)!;
-  ctx.session.userInteractionQueue.push({
+  const player = ctx.session.grimState.players.find(p => p.id === ctx.from?.id)!;
+  const grimState = ctx.session.grimState as ActiveGrimState;
+  grimState.pendingUserInteractions.push({
     type: UserInteractionType.FEED,
     player,
     content: message
@@ -314,7 +350,7 @@ gameCommands.command("feed", async (ctx) => {
   await reply(ctx,
     "Information feed queued. Use /process to process all pending actions.\n\n" +
     "Current queue:\n" +
-    formatQueue(ctx.session.userInteractionQueue)
+    formatQueue(grimState.pendingUserInteractions)
   );
 });
 
@@ -326,8 +362,9 @@ gameCommands.command("action", async (ctx) => {
     return;
   }
 
-  const player = ctx.session.roleAssignments.get(ctx.from?.id!)!;
-  ctx.session.userInteractionQueue.push({
+  const player = ctx.session.grimState.players.find(p => p.id === ctx.from?.id)!;
+  const grimState = ctx.session.grimState as ActiveGrimState;
+  grimState.pendingUserInteractions.push({
     type: UserInteractionType.ACTION,
     player,
     content: message
@@ -336,12 +373,13 @@ gameCommands.command("action", async (ctx) => {
   await reply(ctx,
     "Action queued. Use /process to process all pending actions.\n\n" +
     "Current queue:\n" +
-    formatQueue(ctx.session.userInteractionQueue)
+    formatQueue(grimState.pendingUserInteractions)
   );
 });
 
 // Start Generation Here
 gameCommands.command("remove", async (ctx) => {
+  const grimState = ctx.session.grimState as ActiveGrimState;
   const param = ctx.match;
   if (!param) {
     await reply(ctx, "Please provide the item number to remove.");
@@ -349,19 +387,20 @@ gameCommands.command("remove", async (ctx) => {
   }
 
   const index = parseInt(param, 10);
-  if (Number.isNaN(index) || index < 1 || index > ctx.session.userInteractionQueue.length) {
+  if (Number.isNaN(index) || index < 1 || index > grimState.pendingUserInteractions.length) {
     await reply(ctx, "Invalid item number.");
     return;
   }
 
-  ctx.session.userInteractionQueue = ctx.session.userInteractionQueue.filter((_, i) => i !== (index - 1));
-  await reply(ctx, `Removed item #${index} from the queue.\n\nCurrent queue: \n${formatQueue(ctx.session.userInteractionQueue)}`);
+  grimState.pendingUserInteractions = grimState.pendingUserInteractions.filter((_, i) => i !== (index - 1));
+  await reply(ctx, `Removed item #${index} from the queue.\n\nCurrent queue: \n${formatQueue(grimState.pendingUserInteractions)}`);
 });
 
 
 // Process command
 gameCommands.command("process", async (ctx) => {
-  if (ctx.session.userInteractionQueue.length === 0) {
+  const grimState = ctx.session.grimState as ActiveGrimState;
+  if (grimState.pendingUserInteractions.length === 0) {
     await reply(ctx, "No actions to process.");
     return;
   }
@@ -369,14 +408,14 @@ gameCommands.command("process", async (ctx) => {
 
   try {
     const processActionsResult = await openAIService.processActions(
-      ctx.session.scenarioState.messages,
-      ctx.session.userInteractionQueue,
+      grimState.currentState.state.canon,
+      grimState.pendingUserInteractions,
     );
 
-    const lastMessage = processActionsResult[processActionsResult.length - 1];
+    const assistantResponse = processActionsResult[processActionsResult.length - 1];
 
 
-    const formattedMessages = ctx.session.userInteractionQueue.map(action => {
+    const formattedUserInteractionMessage = grimState.pendingUserInteractions.map(action => {
       switch (action.type) {
         case 'ACTION':
           return `ACTION ${action.player.name}: ${action.content}`;
@@ -385,22 +424,25 @@ gameCommands.command("process", async (ctx) => {
       }
     }).join("\n");
 
-    ctx.session.scenarioState.messages.push({
-      role: "user",
-      content: formattedMessages
-    });
-    ctx.session.scenarioState.messages.push(lastMessage);
+    const newScenarioState = createScenarioStateChildNode(
+      {
+        canon: [...grimState.currentState.state.canon, { role: 'user', content: formattedUserInteractionMessage }, assistantResponse],
+        // TODO: update private info once process actually does that
+        privateInfo: grimState.currentState.state.privateInfo
+      },
+      grimState.currentState
+    );
 
-    const hash = saveState(ctx);
+    grimState.currentState = newScenarioState;
 
-    logger.info("Canonical scenario messages", ctx.session.scenarioState.messages);
+    logger.info("Canonical scenario messages", grimState.currentState.state.canon);
 
-    await sendChunkedReply(ctx, lastMessage.content as string);
+    await sendChunkedReply(ctx, assistantResponse.content as string);
     await reply(ctx, `State saved with hash:`);
-    await reply(ctx, hash);
+    await reply(ctx, grimState.currentState.stateHash);
 
     // Clear the queue after successful processing
-    ctx.session.userInteractionQueue = [];
+    grimState.pendingUserInteractions = [];
 
   } catch (error) {
     logger.error("Failed to process actions", { error });
@@ -410,23 +452,34 @@ gameCommands.command("process", async (ctx) => {
 
 // Rollback command
 gameCommands.command("rollback", async (ctx) => {
-  const hash = ctx.match;
-  if (!hash) {
+  const targetHash = ctx.match;
+  if (!targetHash) {
     await reply(ctx, "Please provide a state hash after the /rollback command");
     return;
   }
 
-  const state = ctx.session.scenarioCheckpoints.get(hash);
-  if (!state) {
+  const grimState = ctx.session.grimState as ActiveGrimState;
+
+  const findNodeByHash = (node: ScenarioStateNode, hash: string): ScenarioStateNode | undefined => {
+    if (node.stateHash === hash) return node;
+    return node.children.reduce<ScenarioStateNode | undefined>(
+      (found, child) => found || findNodeByHash(child, hash),
+      undefined
+    );
+  };
+
+  const scenarioStateNodeSearchResult = findNodeByHash(grimState.rootState, targetHash);
+  if (!scenarioStateNodeSearchResult) {
     await reply(ctx, "Invalid state hash. Please provide a valid hash from a previous state.");
     return;
   }
 
-  // Restore the state
-  ctx.session.scenarioState = JSON.parse(JSON.stringify(state));
+  grimState.currentState = scenarioStateNodeSearchResult;
 
-  await reply(ctx, `Successfully rolled back to state ${hash}`);
-  await sendChunkedReply(ctx, "Current state:\n" + state.messages[state.messages.length - 1].content);
+  await sendChunkedReply(ctx, `Successfully rolled back to state ${targetHash}`);
+  const { canon } = scenarioStateNodeSearchResult.state;
+  const lastMessage = canon[canon.length - 1];
+  await sendChunkedReply(ctx, "Current state:\n" + lastMessage.content);
 });
 
 // Error handling

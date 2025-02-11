@@ -1,11 +1,10 @@
 import OpenAI from "openai";
-import { Player, UserInteraction, UserInteractionType } from "./types";
+import { Player, PrivateInfo, ScenarioUpdate, ScenarioUpdateSchema, UserInteraction, UserInteractionType } from "./types";
 import logger from "./logger";
 import { ChatCompletion, ChatCompletionCreateParamsNonStreaming, ChatCompletionMessageParam } from "openai/resources/chat/completions.mjs";
 import { XMLBuilder } from 'fast-xml-parser';
 import { partition } from "./utils/array";
 import { zodResponseFormat } from "openai/helpers/zod";
-import { z } from "zod";
 
 const maxIntelligenceModelParams: Pick<ChatCompletionCreateParamsNonStreaming, "model" | "reasoning_effort"> = { model: "o1", reasoning_effort: 'high' };
 
@@ -60,21 +59,6 @@ export const playerDescriptionsXml = (players: Player[]): string => {
 };
 
 
-const ScenarioTimelineSchema = z.array(z.object({
-  datetime: z.string(),
-  event: z.string(),
-}));
-
-const PrivateInfoSchema = z.object({
-  scenarioTimeline: ScenarioTimelineSchema,
-  scratchpad: z.string(),
-});
-
-const ScenarioUpdateSchema = z.object({
-  privateInfo: PrivateInfoSchema,
-  currentDateTime: z.string(),
-  playerBriefing: z.string(),
-});
 
 
 export const getInitialPrompt = (players: Player[]) => `You are an expert wargame facilitator, applying the best practices from military and other emergency response wargaming.
@@ -126,12 +110,10 @@ function sampleFromWeightedOutcomes(outcomes: Outcome[]): string {
   return outcomes[outcomes.length - 1].outcome;
 }
 export class ChatService {
-  private privateInfo: z.infer<typeof PrivateInfoSchema>;
-  private currentDateTime: string;
 
   constructor(private readonly openAIClient: IOpenAIClient) { }
 
-  async initializeScenario(scenario: string, players: Player[]): Promise<ChatCompletionMessageParam[]> {
+  async initializeScenario(scenario: string, players: Player[]): Promise<ScenarioUpdate> {
     try {
       logger.info("Initializing scenario", {
         scenario,
@@ -160,18 +142,9 @@ export class ChatService {
       });
 
       const response = completion.choices[0].message.content || "Failed to generate scenario";
-      const { privateInfo, currentDateTime, playerBriefing } = ScenarioUpdateSchema.parse(response);
-      this.privateInfo = privateInfo;
-      this.currentDateTime = currentDateTime;
+      const scenarioUpdate = ScenarioUpdateSchema.parse(response);
 
-      logger.info("Scenario initialized successfully", {
-        responseLength: response.length
-      });
-
-      return [
-        scenarioMessage,
-        { role: "assistant", content: playerBriefing }
-      ];
+      return scenarioUpdate;
     } catch (error) {
       logger.error("Failed to initialize scenario", {
         error,
