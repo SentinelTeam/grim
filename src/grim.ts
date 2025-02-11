@@ -260,10 +260,10 @@ scenarioCommands
       });
 
       const players = ctx.session.grimState.players;
-      const { privateInfo, currentDateTime, playerBriefingMessage } = await openAIService.initializeScenario(scenarioText, players);
+      const { privateInfo, currentDateTime, playerBriefing } = await openAIService.initializeScenario(scenarioText, players);
 
       const rootState = createScenarioStateRoot({
-        canon: [playerBriefingMessage],
+        canon: [{ role: "assistant", content: playerBriefing }],
         privateInfo
       });
 
@@ -275,7 +275,7 @@ scenarioCommands
         currentState: rootState
       };
 
-      await sendChunkedReply(ctx, playerBriefingMessage.content);
+      await sendChunkedReply(ctx, playerBriefing);
       await reply(ctx, "Initial state saved with hash:");
       await reply(ctx, ctx.session.grimState.currentState.stateHash);
 

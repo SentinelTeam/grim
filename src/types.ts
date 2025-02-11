@@ -35,7 +35,7 @@ export type PrivateInfo = z.infer<typeof PrivateInfoSchema>;
 export const ScenarioUpdateSchema = z.object({
   privateInfo: PrivateInfoSchema,
   currentDateTime: z.string(),
-  playerBriefingMessage: z.object({ role: z.literal("assistant"), content: z.string() }),
+  playerBriefing: z.string(),
 });
 
 export type ScenarioUpdate = z.infer<typeof ScenarioUpdateSchema>
