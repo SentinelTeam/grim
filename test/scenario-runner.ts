@@ -79,7 +79,7 @@ async function runScenario(scenarioPath: string) {
       logger.info(
         `Round ${roundIndex + 1} results:\n` +
         'Messages:\n' +
-        currentState.state.canon.map((msg, i) => `[${i + 1}] ${msg.role}: ${msg.content}`).join('\n') +
+        currentState.state.canon.map((msg, i) => `[${i + 1}] ${msg.role}: ${msg.content}`).join('\n\n') +
         '\n\nPrivate Information:\n' +
         `Current time: ${currentState.state.privateInfo.currentDateTime}\n` +
         'Timeline:\n' +
@@ -97,5 +97,23 @@ async function runScenario(scenarioPath: string) {
   }
 }
 
-// Run the scenario with the file path from command line arguments
-runScenario(process.argv[2]);
+async function main() {
+  const scenariosDir = path.resolve(__dirname, 'scenarios');
+  const scenarioFiles = process.argv[2]
+    ? [process.argv[2]]
+    : fs.readdirSync(scenariosDir)
+      .filter((file: string): boolean => file.endsWith('.json'))
+      .map(file => path.join(scenariosDir, file));
+
+  if (scenarioFiles.length === 0) {
+    console.error(`No scenario files found in directory: ${scenariosDir}`);
+    process.exit(1);
+  }
+
+  for (const scenarioPath of scenarioFiles) {
+    console.info(`Running scenario file: ${scenarioPath}`);
+    await runScenario(scenarioPath);
+  }
+}
+
+main();
