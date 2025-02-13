@@ -1,6 +1,6 @@
 import { ChatService, DefaultOpenAIClient } from '../src/openai';
 import { Player, UserInteraction } from '../src/types';
-import { GameStateManager } from '../src/game-state';
+import { GameStateManager, ScenarioStateNode } from '../src/game-state';
 import * as fs from 'fs';
 import * as path from 'path';
 import logger from '../src/logger';
@@ -39,33 +39,32 @@ async function runScenario(scenarioPath: string) {
 
   try {
     // Initialize scenario
-    logger.info('Initializing scenario...');
     const { rootState, playerBriefing } = await gameStateManager.initializeScenario(
       scenarioData.scenarioTopic,
       scenarioData.players
     );
 
-    // Log initial state
-    logger.info(
-      'Initial state:\n' +
-      'Messages:\n' +
-      rootState.state.canon.map((msg, i) => `[${i + 1}] ${msg.role}: ${msg.content}`).join('\n') +
-      '\n\nPrivate Information:\n' +
-      `Current time: ${rootState.state.privateInfo.currentDateTime}\n` +
-      'Timeline:\n' +
-      rootState.state.privateInfo.scenarioTimeline.map((event, i) =>
-        `${event.datetime}: ${event.event}`
-      ).join('\n') +
-      '\n\nScratchpad:\n' +
-      rootState.state.privateInfo.scratchpad
-    );
-
     let currentState = rootState;
 
-    // Process each round of actions
+    let privateInfoSnapshots: string[] = [];
+
+    function saveSnapshot(state: ScenarioStateNode) {
+      privateInfoSnapshots.push(
+        `Current time: ${state.state.privateInfo.currentDateTime}\n\n` +
+        'Timeline:\n' +
+        state.state.privateInfo.scenarioTimeline.map((event, i) =>
+          `${event.datetime}: ${event.event}`
+        ).join('\n') +
+        '\n\nScratchpad:\n' +
+        state.state.privateInfo.scratchpad
+      );
+    }
+
     for (let roundIndex = 0; roundIndex < scenarioData.actionRounds.length; roundIndex++) {
+
+      saveSnapshot(currentState);
+
       const actions = scenarioData.actionRounds[roundIndex];
-      logger.info(`Processing round ${roundIndex + 1}...`);
 
       // Process actions for this round
       const { newState, response } = await gameStateManager.processActions(
@@ -74,22 +73,19 @@ async function runScenario(scenarioPath: string) {
       );
 
       currentState = newState;
-
-      // Output results for this round
-      logger.info(
-        `Round ${roundIndex + 1} results:\n` +
-        'Messages:\n' +
-        currentState.state.canon.map((msg, i) => `[${i + 1}] ${msg.role}: ${msg.content}`).join('\n\n') +
-        '\n\nPrivate Information:\n' +
-        `Current time: ${currentState.state.privateInfo.currentDateTime}\n` +
-        'Timeline:\n' +
-        currentState.state.privateInfo.scenarioTimeline.map((event, i) => 
-          `${event.datetime}: ${event.event}`
-        ).join('\n') +
-        '\n\nScratchpad:\n' +
-        currentState.state.privateInfo.scratchpad
-      );
     }
+
+    saveSnapshot(currentState);
+
+    // TODO: save output to a file?
+
+    logger.info(`Results of scenario ${scenarioPath}:\n\n`);
+
+    for (let index = 0; index < privateInfoSnapshots.length; index++) {
+      logger.info(`Private info at start of round ${index + 1}:\n\n${privateInfoSnapshots[index]}\n\n`);
+    }
+
+    logger.info(`Canonical messages:\n\n${currentState.state.canon.map((message, index) => `[${index}] ${message.role}:\n\n${message.content}`).join('\n\n')}`);
 
   } catch (error) {
     logger.error('Error running scenario:', error);
