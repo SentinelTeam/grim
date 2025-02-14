@@ -4,26 +4,12 @@ import { ChatService, DefaultOpenAIClient } from "./openai";
 import logger from "./logger";
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
-import { Player, UserInteraction, UserInteractionType } from "./types";
-import { ChatCompletionMessageParam } from "openai/resources/index.mjs";
-import { GameStateManager, ScenarioStateNode, ScenarioStateRoot } from "./game-state";
+import { Player, UserInteractionType } from "./types";
+import { Game } from "./game-state";
 
 config();
 
-type InactiveGrimState = {
-  playing: false;
-}
-
-type ActiveGrimState = {
-  playing: true;
-  pendingUserInteractions: UserInteraction[];
-  rootState: ScenarioStateRoot;
-  currentState: ScenarioStateNode;
-}
-
-type GrimState = { players: Player[] } & (InactiveGrimState | ActiveGrimState);
-
-type SessionData = { grimState: GrimState };
+type SessionData = { players: Player[], game: Game | undefined };
 
 type BotContext = Context & SessionFlavor<SessionData>;
 
@@ -32,7 +18,6 @@ const bot = new Bot<BotContext>(process.env.TELEGRAM_BOT_TOKEN || "");
 
 const openAIClient = new DefaultOpenAIClient(process.env.OPENAI_API_KEY || "");
 const openAIService = new ChatService(openAIClient);
-const gameStateManager = new GameStateManager(openAIService);
 
 const reply = async (ctx: BotContext, message: string) => {
   return ctx.reply(message);
@@ -66,26 +51,27 @@ const sendChunkedReply = async (ctx: BotContext, text: string) => {
 // Initialize session storage
 bot.use(session({
   initial: (): SessionData => ({
-    grimState: {
-      playing: false,
-      players: [],
-    }
+    players: [],
+    game: undefined
   })
 }));
 
+const getRole = (ctx: BotContext): Player | undefined => {
+  const userId = ctx.from?.id;
+  if (!userId) {
+    return undefined;
+  }
+  return ctx.session.players.find(p => p.id === userId);
+};
+
 // Middleware to check if user has a role
 const requireRole = (ctx: BotContext): boolean => {
-  const userId = ctx.from?.id;
-  if (!userId || !ctx.session.grimState.players.find(p => p.id === userId)) {
-    reply(ctx, "You need to select a role first using /role`");
-    return false;
-  }
-  return true;
+  return getRole(ctx) !== undefined;
 };
 
 // Middleware to check if scenario is active
 const requireScenario = (ctx: BotContext): boolean => {
-  if (!ctx.session.grimState.playing) {
+  if (!ctx.session.game) {
     reply(ctx, "No active scenario. Start one using /scenario first");
     return false;
   }
@@ -94,7 +80,8 @@ const requireScenario = (ctx: BotContext): boolean => {
 
 // Middleware to check if scenario is NOT active
 const requireNoScenario = (ctx: BotContext): boolean => {
-  if (ctx.session.grimState.playing) {
+  if (ctx.session.game) {
+    reply(ctx, "That command is not allowed after scenario has started");
     return false;
   }
   return true;
@@ -103,12 +90,15 @@ const requireNoScenario = (ctx: BotContext): boolean => {
 // Help command
 bot.command("help", async (ctx) => {
   const baseCommands = [
-    "/role - Create your role",
     "/help - Show this help message"
   ];
 
+  const setupCommands = [
+    "/role - Create your role",
+    "/scenario - Start a new scenario"
+  ];
+
   const scenarioCommands = [
-    "/scenario - Start a new scenario",
     "/info - Queue an information request",
     "/feed - Queue information to incorporate into the world",
     "/action - Queue an action in the world",
@@ -117,15 +107,23 @@ bot.command("help", async (ctx) => {
     "/rollback - Roll back the scenario to a previous checkpoint"
   ];
 
-  const hasRole = ctx.from && ctx.session.grimState.players.find(p => p.id === ctx.from?.id);
-  const availableCommands = [...baseCommands, ...(hasRole ? scenarioCommands : [])];
+  const beforeGame = ctx.session.game === undefined;
+  const hasRole = ctx.from && requireRole(ctx);
+  const availableCommands = [...baseCommands, ...(beforeGame ? setupCommands : (hasRole ? scenarioCommands : []))];
 
   await reply(ctx, "Available commands:\n" + availableCommands.join("\n"));
 });
 
+// Create a composer for commands that require no active scenario
+const setupCommands = bot.filter(requireNoScenario);
+
 // Role creation command
-bot.command("role", async (ctx) => {
+setupCommands.command("role", async (ctx) => {
   const userId = ctx.from?.id;
+  if (!userId) {
+    await reply(ctx, "Error: unable to determine sender of /role command");
+    return;
+  }
 
   // Get role description from command
   const roleDescription = ctx.match;
@@ -164,13 +162,13 @@ bot.command("role", async (ctx) => {
 
   // Create new player
   const player: Player = {
-    id: userId!,
+    id: userId,
     name,
     role
   };
 
   // Assign role to user
-  ctx.session.grimState.players.push(player);
+  ctx.session.players.push(player);
   await reply(ctx, `@${ctx.from?.username} is now ${name} (${role})`);
 });
 
@@ -195,16 +193,11 @@ if (argv['scenario-file']) {
   }
 }
 
-// Create a composer for scenario-related commands that require a role
-const scenarioCommands = bot.filter(requireRole);
-
 // Scenario command - also requires no active scenario
-scenarioCommands
-  .filter(requireNoScenario)
-  .command("scenario", async (ctx) => {
-    const providedScenarioText = ctx.match;
-    const scenarioText = providedScenarioText || preloadedScenario;
-    if (!scenarioText) {
+setupCommands.command("scenario", async (ctx) => {
+  const providedScenarioText = ctx.match;
+  const scenarioText = providedScenarioText || preloadedScenario;
+  if (!scenarioText) {
       await reply(ctx, "Please provide a scenario description after the /scenario command");
       return;
     }
@@ -218,25 +211,18 @@ scenarioCommands
         scenarioLength: scenarioText.length
       });
 
-      const players = ctx.session.grimState.players;
-      const { rootState, playerBriefing } = await gameStateManager.initializeScenario(scenarioText, players);
+      const { newGame: game, playerBriefing } = await Game.startGame(openAIService, scenarioText, ctx.session.players);
 
-      ctx.session.grimState = {
-        playing: true,
-        players,
-        pendingUserInteractions: [],
-        rootState,
-        currentState: rootState
-      };
+      ctx.session.game = game;
 
       await sendChunkedReply(ctx, playerBriefing);
       await reply(ctx, "Initial state saved with hash:");
-      await reply(ctx, ctx.session.grimState.currentState.stateHash);
+      await reply(ctx, game.stateHash());
 
       logger.info("Scenario started successfully", {
         userId: ctx.from?.id,
         username: ctx.from?.username,
-        initialStateHash: ctx.session.grimState.currentState.stateHash
+        initialStateHash: game.stateHash()
       });
     } catch (error) {
       logger.error("Failed to initialize scenario", {
@@ -250,16 +236,7 @@ scenarioCommands
   });
 
 // Create a composer for commands that require both role and active scenario
-const gameCommands = scenarioCommands.filter(requireScenario);
-
-// Helper function to format queue for display
-const formatQueue = (queue: UserInteraction[]): string => {
-  if (queue.length === 0) return "Queue is empty";
-
-  return queue.map((action, index) =>
-    `${index + 1}. ${action.player.name} - ${action.type}: ${action.content}`
-  ).join('\n');
-};
+const gameCommands = bot.filter(requireRole).filter(requireScenario);
 
 // Info command
 gameCommands.command("info", async (ctx) => {
@@ -269,9 +246,8 @@ gameCommands.command("info", async (ctx) => {
     return;
   }
 
-  const player = ctx.session.grimState.players.find(p => p.id === ctx.from?.id)!;
-  const grimState = ctx.session.grimState as ActiveGrimState;
-  grimState.pendingUserInteractions.push({
+  const player = getRole(ctx)!;
+  ctx.session.game = ctx.session.game?.queueUserInteraction({
     type: UserInteractionType.INFO,
     player,
     content: message
@@ -281,7 +257,7 @@ gameCommands.command("info", async (ctx) => {
     ctx,
     "Information request queued. Use /process to process all pending actions. Use /remove <number> to remove an item from the queue.\n\n" +
     "Current queue:\n" +
-    formatQueue(grimState.pendingUserInteractions)
+    ctx.session.game?.formatUserInteractions()
   );
 });
 
@@ -293,9 +269,8 @@ gameCommands.command("feed", async (ctx) => {
     return;
   }
 
-  const player = ctx.session.grimState.players.find(p => p.id === ctx.from?.id)!;
-  const grimState = ctx.session.grimState as ActiveGrimState;
-  grimState.pendingUserInteractions.push({
+  const player = getRole(ctx)!;
+  ctx.session.game = ctx.session.game?.queueUserInteraction({
     type: UserInteractionType.FEED,
     player,
     content: message
@@ -304,7 +279,7 @@ gameCommands.command("feed", async (ctx) => {
   await reply(ctx,
     "Information feed queued. Use /process to process all pending actions.\n\n" +
     "Current queue:\n" +
-    formatQueue(grimState.pendingUserInteractions)
+    ctx.session.game?.formatUserInteractions()
   );
 });
 
@@ -316,9 +291,8 @@ gameCommands.command("action", async (ctx) => {
     return;
   }
 
-  const player = ctx.session.grimState.players.find(p => p.id === ctx.from?.id)!;
-  const grimState = ctx.session.grimState as ActiveGrimState;
-  grimState.pendingUserInteractions.push({
+  const player = getRole(ctx)!;
+  ctx.session.game = ctx.session.game?.queueUserInteraction({
     type: UserInteractionType.ACTION,
     player,
     content: message
@@ -327,13 +301,12 @@ gameCommands.command("action", async (ctx) => {
   await reply(ctx,
     "Action queued. Use /process to process all pending actions.\n\n" +
     "Current queue:\n" +
-    formatQueue(grimState.pendingUserInteractions)
+    ctx.session.game?.formatUserInteractions()
   );
 });
 
 // Start Generation Here
 gameCommands.command("remove", async (ctx) => {
-  const grimState = ctx.session.grimState as ActiveGrimState;
   const param = ctx.match;
   if (!param) {
     await reply(ctx, "Please provide the item number to remove.");
@@ -341,37 +314,30 @@ gameCommands.command("remove", async (ctx) => {
   }
 
   const index = parseInt(param, 10);
-  if (Number.isNaN(index) || index < 1 || index > grimState.pendingUserInteractions.length) {
+  if (Number.isNaN(index) || index < 1 || index > ctx.session.game!.userInteractions.size) {
     await reply(ctx, "Invalid item number.");
     return;
   }
 
-  grimState.pendingUserInteractions = grimState.pendingUserInteractions.filter((_, i) => i !== (index - 1));
-  await reply(ctx, `Removed item #${index} from the queue.\n\nCurrent queue: \n${formatQueue(grimState.pendingUserInteractions)}`);
+  ctx.session.game = ctx.session.game?.removeUserInteraction(index - 1);
+  await reply(ctx, `Removed item #${index} from the queue.\n\nCurrent queue: \n${ctx.session.game?.formatUserInteractions()}`);
 });
 
 // Process command
 gameCommands.command("process", async (ctx) => {
-  const grimState = ctx.session.grimState as ActiveGrimState;
-  if (grimState.pendingUserInteractions.length === 0) {
+  if (ctx.session.game?.userInteractions.size === 0) {
     await reply(ctx, "No actions to process.");
     return;
   }
   await reply(ctx, "Processing actions… Please don't add any more actions until the response arrives.");
 
   try {
-    const { newState, response } = await gameStateManager.processActions(
-      grimState.currentState,
-      grimState.pendingUserInteractions
-    );
+    const { updatedGame: game, response } = await ctx.session.game!.processActions();
 
-    grimState.currentState = newState;
+    ctx.session.game = game;
     await sendChunkedReply(ctx, response);
     await reply(ctx, `State saved with hash:`);
-    await reply(ctx, grimState.currentState.stateHash);
-
-    // Clear the queue after successful processing
-    grimState.pendingUserInteractions = [];
+    await reply(ctx, game.stateHash());
 
   } catch (error) {
     logger.error("Failed to process actions", { error });
@@ -382,23 +348,18 @@ gameCommands.command("process", async (ctx) => {
 // Rollback command
 gameCommands.command("rollback", async (ctx) => {
   const targetHash = ctx.match;
-  if (!targetHash) {
-    await reply(ctx, "Please provide a state hash after the /rollback command");
+
+  const game = ctx.session.game!.rollback(targetHash);
+  if (!game) {
+    const invalid = targetHash ? "Invalid state hash" : "Already at initial state";
+    await reply(ctx, `${invalid}. Please provide a valid hash from a previous state.`);
     return;
   }
 
-  const grimState = ctx.session.grimState as ActiveGrimState;
-  const scenarioStateNodeSearchResult = gameStateManager.findNodeByHash(grimState.rootState, targetHash);
-  if (!scenarioStateNodeSearchResult) {
-    await reply(ctx, "Invalid state hash. Please provide a valid hash from a previous state.");
-    return;
-  }
-
-  grimState.currentState = scenarioStateNodeSearchResult;
+  ctx.session.game = game;
 
   await sendChunkedReply(ctx, `Successfully rolled back to state ${targetHash}`);
-  const { canon } = scenarioStateNodeSearchResult.state;
-  const lastMessage = canon[canon.length - 1];
+  const lastMessage = game.currentState.canon.last()!;
   await sendChunkedReply(ctx, "Current state:\n" + lastMessage.content);
 });
 
