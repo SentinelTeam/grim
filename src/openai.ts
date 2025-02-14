@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { Player, PrivateInfo, ScenarioUpdate, ScenarioUpdateSchema, UserInteraction, UserInteractionType } from "./types";
+import { Player, PrivateInfo, ScenarioTimeline, ScenarioUpdate, ScenarioUpdateSchema, UserInteraction, UserInteractionType } from "./types";
 import logger from "./logger";
 import { ChatCompletion, ChatCompletionCreateParamsNonStreaming, ChatCompletionMessageParam } from "openai/resources/chat/completions.mjs";
 import { XMLBuilder } from 'fast-xml-parser';
@@ -179,7 +179,9 @@ export class ChatService {
   async processActions(
     canonicalScenarioMessages: ChatCompletionMessageParam[],
     actions: UserInteraction[],
-  ): Promise<ChatCompletionMessageParam[]> {
+    timeline: ScenarioTimeline,
+    scratchpad: string
+  ): Promise<ScenarioUpdate> {
     try {
       logger.info("Processing actions with forecaster");
 
@@ -206,6 +208,16 @@ When providing outcomes for actions, at the very least consider the following:
 - External factors and opposition
 - Previous related events in the scenario
 - How this action may interact with other concurrent actions`
+      };
+
+      const timelineMessage: ChatCompletionMessageParam = {
+        role: "user",
+        content: `Here is your planned timeline of events:\n${timeline.map(event => `${event.datetime}: ${event.event}`).join("\n")}`
+      };
+
+      const scratchpadMessage: ChatCompletionMessageParam = {
+        role: "user",
+        content: `Here is your scratchpad:\n${scratchpad}`
       };
 
       logger.debug("actions", { actions });
@@ -271,6 +283,8 @@ ${action.type} ${action.player.name}: ${action.content}`
           messages: [
             forecasterDeveloperMessage,
             ...canonicalScenarioMessages,
+            timelineMessage,
+            scratchpadMessage,
             contextAndTargetMessage
           ],
         });
@@ -316,43 +330,39 @@ Important note because previous iterations of you kept making this mistake: If o
     
 Just like the previous messages in the chat describing the world, you should include the scenario datetime and offset since the beginning of the scenario (e.g. T+1day,12hours). All times are in UTC.
 
-Your response should be in the following format:
-# Current DateTime
-<current datetime>
-# Time Offset
-<time offset>
-# Result of Player Interactions
-## INFO
-## ACTION
-# Narrative Update
-<narrative>`
+You have access to a scratchpad and a timeline of events that players can't see, which you use to remember your plan for the game. Use these to refresh your memory, and update them as you see fit.`
       };
+
+      const outcomesMessage = `Here are the player interactions and their outcomes:\n${allOutcomesStr}`;
 
       const gameMasterRequestMessage: ChatCompletionMessageParam = {
         role: "user",
-        content: `Here are the player interactions and their outcomes:\n${allOutcomesStr}`
+        content: outcomesMessage
       };
 
       logger.debug("Sending forecaster results to narrator", {
-        messageLength: gameMasterRequestMessage.content.length
+        timelineMessageLength: timelineMessage.content.length,
+        scratchpadMessageLength: scratchpadMessage.content.length,
+        outcomesMessageLength: outcomesMessage.length
       });
 
-      const narratorCompletion = await this.openAIClient.logAndCreateChatCompletion({
+      const narratorCompletion = await this.openAIClient.logAndCreateParsedChatCompletion<ScenarioUpdate>({
         ...maxIntelligenceModelParams,
-        messages: [gameMasterDeveloperMessage, ...canonicalScenarioMessages, gameMasterRequestMessage],
+        messages: [gameMasterDeveloperMessage, ...canonicalScenarioMessages, timelineMessage, scratchpadMessage, gameMasterRequestMessage],
+        response_format: zodResponseFormat(ScenarioUpdateSchema, "scenarioUpdate")
       });
 
-      const narratorResponse = narratorCompletion.choices[0].message.content || "Failed to generate narrative";
+      const narratorResponse = narratorCompletion.choices[0].message.parsed;
+
+      if (!narratorResponse) {
+        throw new Error("No narrator response received or parse failed");
+      }
 
       logger.info("Narrator generated story update", {
-        responseLength: narratorResponse.length
+        responseLength: narratorResponse.playerBriefing.length
       });
 
-      return [
-        ...canonicalScenarioMessages,
-        { role: "user", content: allOutcomesStr },
-        { role: "assistant", content: narratorResponse }
-      ];
+      return narratorResponse;
     } catch (error) {
       logger.error("Failed to process actions", {
         error,

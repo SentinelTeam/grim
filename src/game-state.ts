@@ -125,20 +125,22 @@ export class Game {
     updatedGame: Game;
     response: string;
   }> {
-    const processActionsResult = await openAIService.processActions(
+    const processActionsResult = await this.openAIService.processActions(
       this.currentState.canon.toArray(),
-      this.userInteractions.toArray()
+      this.userInteractions.toArray(),
+      this.currentState.privateInfo.scenarioTimeline,
+      this.currentState.privateInfo.scratchpad
     );
 
-    const assistantResponse = processActionsResult[processActionsResult.length - 1];
+    const playerBriefing = processActionsResult.playerBriefing;
     const formattedUserInteractionMessage = this.formatUserInteractions();
 
     const newState = this.currentState.child(
       [
         { role: 'user', content: formattedUserInteractionMessage },
-        assistantResponse
+        { role: 'assistant', content: playerBriefing }
       ],
-      this.currentState.privateInfo // TODO: update private info
+      processActionsResult.privateInfo // TODO: update private info
     );
 
     return {
@@ -146,7 +148,7 @@ export class Game {
         currentState: newState,
         userInteractions: List()
       }),
-      response: assistantResponse.content as string
+      response: playerBriefing
     };
   }
 }

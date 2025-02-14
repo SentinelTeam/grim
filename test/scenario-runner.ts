@@ -57,8 +57,7 @@ async function runScenario(scenarioPath: string) {
 
     function formatPrivateInfo(game: Game): string {
       const privateInfo = game.currentState.privateInfo;
-      return `Current time: ${privateInfo.currentDateTime}\n\n` +
-        'Timeline:\n' +
+      return 'Timeline:\n' +
         privateInfo.scenarioTimeline.map((event, i) =>
           `${event.datetime}: ${event.event}`
         ).join('\n') +

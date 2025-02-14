@@ -24,14 +24,14 @@ const ScenarioTimelineSchema = z.array(z.object({
   event: z.string(),
 }));
 
+export type ScenarioTimeline = z.infer<typeof ScenarioTimelineSchema>;
+
 export const PrivateInfoSchema = z.object({
   scenarioTimeline: ScenarioTimelineSchema,
   scratchpad: z.string(),
-  currentDateTime: z.string(),
 });
 
 export type PrivateInfo = z.infer<typeof PrivateInfoSchema>;
-
 
 export const ScenarioUpdateSchema = z.object({
   privateInfo: PrivateInfoSchema,
