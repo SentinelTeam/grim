@@ -32,7 +32,7 @@ export class ScenarioState {
       privateInfo: this.privateInfo,
       parentHash: this.parentHash
     });
-    this.hash = crypto.createHash('sha256').update(stateString).digest('hex').slice(0, 8);
+    this.hash = crypto.createHash('sha256').update(stateString).digest('hex');
   }
 
   static root(initialMessages: ChatCompletionMessageParam[], privateInfo: PrivateInfo): ScenarioState {
@@ -98,11 +98,7 @@ export class Game {
     return this.currentState.hash;
   }
 
-  rollback(hash: string | undefined = undefined): Game | undefined {
-    hash = hash ?? this.currentState.parentHash;
-    if (!hash) {
-      return undefined;
-    }
+  rollback(hash: string): Game | undefined {
     const state = this.scenarioStates.get(hash);
     if (!state) {
       return undefined;
