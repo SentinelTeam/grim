@@ -1,0 +1,67 @@
+{
+  "players": [
+    {
+      "name": "Rai",
+      "role": "Head of Emergency Response"
+    },
+    {
+      "name": "Nuño",
+      "role": "Head of Foresight"
+    }
+  ],
+  "scenarioTopic": "Social unrest due to unemployment from AI.",
+  "actionRounds": [
+    [
+      {
+        "type": "ACTION",
+        "player": {
+        "name": "Rai",
+        "role": "Head of Emergency Response"
+      },
+      "content": "1 hour of research on what heads of state are saying about this."
+    },
+    {
+      "type": "ACTION", 
+      "player": {
+        "name": "Rai",
+        "role": "Head of Emergency Response"
+      },
+      "content": "30 minutes of research into how the stock market is reacting"
+    },
+    {
+      "type": "INFO",
+      "player": {
+        "name": "Nuño",
+        "role": "Head of Foresight"
+      },
+      "content": "What is the unemployment rate in the US?"
+    },
+    {
+      "type": "ACTION",
+      "player": {
+        "name": "Nuño",
+        "role": "Head of Foresight"
+      },
+        "content": "1 hour of messaging with friends and family about finding shelf-stable food, water, and being ready to shelter in place."
+      }
+    ],
+    [
+      {
+        "type": "ACTION",
+        "player": {
+          "name": "Rai",
+          "role": "Head of Emergency Response"
+        },
+        "content": "30 minutes of ordering emergency supplies for the office."
+      },
+      {
+        "type": "ACTION",
+        "player": {
+          "name": "Nuño",
+          "role": "Head of Foresight"
+        },
+        "content": "1 hour of messaging with contacts in government to determine if they are aware of the situation."
+      }
+    ]
+  ]
+}

@@ -2,6 +2,10 @@
 
 A Telegram bot for simulating and role-playing global risk scenarios. Players can take on different roles and interact with scenarios through actions and information sharing. You can read more about the motivation behind it here: [Scaling Wargaming for Global Catastrophic Risks with AI](https://blog.sentinel-team.org/p/scaling-wargaming-for-global-catastrophic-risks).
 
+## Prerequisites
+
+1. Install [Bun](https://bun.sh/docs/installation)
+
 ## Getting started
 
 1. Clone this repository

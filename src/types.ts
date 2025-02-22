@@ -27,6 +27,7 @@ const ScenarioTimelineSchema = z.array(z.object({
 export const PrivateInfoSchema = z.object({
   scenarioTimeline: ScenarioTimelineSchema,
   scratchpad: z.string(),
+  currentDateTime: z.string(),
 });
 
 export type PrivateInfo = z.infer<typeof PrivateInfoSchema>;
