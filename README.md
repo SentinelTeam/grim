@@ -10,10 +10,10 @@ A Telegram bot for simulating and role-playing global risk scenarios. Players ca
 
 ```
 TELEGRAM_BOT_TOKEN=your_key
-OPENAI_API_KEY=your_key
+ANTHROPIC_API_KEY=your_key
 ```
 
-You can get an OpenAI key from [platform.openai.com/settings](https://platform.openai.com/settings), and it should have access to the o1 model, which OpenAI is slowly rolling out. You can get a Telegram bot token by following instructions [here](https://core.telegram.org/bots#how-do-i-create-a-bot) (messaging the @BotFather account on Telegram.)
+You can get an Anthropic API key from [console.anthropic.com](https://console.anthropic.com/), which provides access to Claude Sonnet 3.7, the model used by this application. You can get a Telegram bot token by following instructions [here](https://core.telegram.org/bots#how-do-i-create-a-bot) (messaging the @BotFather account on Telegram.)
 
 ## Usage
 

@@ -1,12 +1,11 @@
 import { Bot, Context, session, SessionFlavor, Middleware } from "grammy";
 import { config } from "dotenv";
-import { ChatService, DefaultOpenAIClient } from "./openai";
+import { ChatService, DefaultAnthropicClient, ChatCompletionMessageParam } from "./anthropic";
 import logger from "./logger";
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import crypto from 'crypto';
 import { Player, UserInteraction, UserInteractionType } from "./types";
-import { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 
 config();
 
@@ -28,8 +27,8 @@ type BotContext = Context & SessionFlavor<SessionData>;
 // Create bot instance
 const bot = new Bot<BotContext>(process.env.TELEGRAM_BOT_TOKEN || "");
 
-const openAIClient = new DefaultOpenAIClient(process.env.OPENAI_API_KEY || "");
-const openAIService = new ChatService(openAIClient);
+const anthropicClient = new DefaultAnthropicClient(process.env.ANTHROPIC_API_KEY || "");
+const chatService = new ChatService(anthropicClient);
 
 // Helper function to generate hash for scenario state
 const generateStateHash = (state: ScenarioState): string => {
@@ -233,7 +232,7 @@ scenarioCommands
       });
 
       const players = Array.from(ctx.session.roleAssignments.values());
-      const messages = await openAIService.initializeScenario(scenarioText, players);
+      const messages = await chatService.initializeScenario(scenarioText, players);
 
       ctx.session.scenarioState.isActive = true;
       ctx.session.scenarioState.messages = messages;
@@ -368,7 +367,7 @@ gameCommands.command("process", async (ctx) => {
   await reply(ctx, "Processing actions… Please don't add any more actions until the response arrives.");
 
   try {
-    const processActionsResult = await openAIService.processActions(
+    const processActionsResult = await chatService.processActions(
       ctx.session.scenarioState.messages,
       ctx.session.actionQueue,
     );

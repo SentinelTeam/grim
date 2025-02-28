@@ -1,9 +1,9 @@
-import { ChatService, DefaultOpenAIClient } from '../src/openai';
+import { ChatService, DefaultAnthropicClient } from '../src/anthropic';
 import { Player, UserInteraction, UserInteractionType } from '../src/types';
 
 const SEED = 42;
-const openAIClient = new DefaultOpenAIClient(process.env.OPENAI_API_KEY || "", SEED);
-const openAIService = new ChatService(openAIClient);
+const anthropicClient = new DefaultAnthropicClient(process.env.ANTHROPIC_API_KEY || "", SEED);
+const chatService = new ChatService(anthropicClient);
 
 const rai = {
   id: 1,
@@ -24,7 +24,7 @@ const players: Player[] = [
 
 const scenarioTopic = 'Social unrest due to unemployment from AI.';
 
-const canonicalScenarioHistory = await openAIService.initializeScenario(scenarioTopic, players);
+const canonicalScenarioHistory = await chatService.initializeScenario(scenarioTopic, players);
 
 const mockActions: UserInteraction[] = [
   {
@@ -49,7 +49,7 @@ const mockActions: UserInteraction[] = [
   }
 ];
 
-const result = await openAIService.processActions(canonicalScenarioHistory, mockActions);
+const result = await chatService.processActions(canonicalScenarioHistory, mockActions);
 for (const message of result) {
   console.log(message.role);
   console.log(message.content);
