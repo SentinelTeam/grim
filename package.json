@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.38.0",
+    "openai": "^4.28.0",
     "@dqbd/tiktoken": "^1.0.18",
     "dotenv": "^16.4.7",
     "fast-xml-parser": "^4.5.1",

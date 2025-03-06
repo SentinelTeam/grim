@@ -1,6 +1,6 @@
 import { Bot, Context, session, SessionFlavor, Middleware } from "grammy";
 import { config } from "dotenv";
-import { ChatService, DefaultAnthropicClient, ChatCompletionMessageParam } from "./anthropic";
+import { ChatService, DefaultAIClient, ChatCompletionMessageParam } from "./ai-client";
 import logger from "./logger";
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
@@ -27,8 +27,8 @@ type BotContext = Context & SessionFlavor<SessionData>;
 // Create bot instance
 const bot = new Bot<BotContext>(process.env.TELEGRAM_BOT_TOKEN || "");
 
-const anthropicClient = new DefaultAnthropicClient(process.env.ANTHROPIC_API_KEY || "");
-const chatService = new ChatService(anthropicClient);
+const aiClient = new DefaultAIClient(process.env.ANTHROPIC_API_KEY || "", "anthropic");
+const chatService = new ChatService(aiClient);
 
 // Helper function to generate hash for scenario state
 const generateStateHash = (state: ScenarioState): string => {

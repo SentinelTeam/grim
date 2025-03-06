@@ -1,9 +1,9 @@
-import { ChatService, DefaultAnthropicClient } from '../src/anthropic';
+import { ChatService, DefaultAIClient } from '../src/ai-client';
 import { Player, UserInteraction, UserInteractionType } from '../src/types';
 
 const SEED = 42;
-const anthropicClient = new DefaultAnthropicClient(process.env.ANTHROPIC_API_KEY || "", SEED);
-const chatService = new ChatService(anthropicClient);
+const aiClient = new DefaultAIClient(process.env.ANTHROPIC_API_KEY || "", "anthropic", SEED);
+const chatService = new ChatService(aiClient);
 
 const rai = {
   id: 1,
