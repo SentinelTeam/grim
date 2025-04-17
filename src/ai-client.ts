@@ -114,6 +114,22 @@ export class DefaultAIClient implements IAIClient {
       const assistantMessages = (res.output || []).filter((item: any) => item.type === "message");
       const lastAssistant = assistantMessages[assistantMessages.length - 1] || {};
 
+      // Flatten assistant content into plain string for downstream systems (e.g., Telegram)
+      const contentText: string = (() => {
+        const raw = lastAssistant.content;
+        if (typeof raw === "string") return raw;
+        if (Array.isArray(raw)) {
+          return raw
+            .map((block: any) => {
+              if (typeof block === "string") return block;
+              if (block && typeof block.text === "string") return block.text;
+              return "";
+            })
+            .join("\n\n");
+        }
+        return "";
+      })();
+
       const pseudoChatCompletion = {
         id: res.id,
         choices: [
@@ -122,7 +138,7 @@ export class DefaultAIClient implements IAIClient {
             finish_reason: res.finish_reason ?? "stop",
             message: {
               role: lastAssistant.role ?? "assistant",
-              content: lastAssistant.content ?? res.output_text ?? "",
+              content: contentText || res.output_text || "",
               tool_calls: toolCalls.length ? toolCalls : undefined,
             },
           },
