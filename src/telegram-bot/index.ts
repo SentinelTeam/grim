@@ -26,10 +26,33 @@ type BotContext = Context & SessionFlavor<SessionData>;
 export async function botStart(): Promise<void> {
   config();
 
+  // Parse command-line arguments first to get the provider
+  const argv = yargs(hideBin(process.argv))
+    .option('scenario-file', {
+      type: 'string',
+      description: 'Path to the scenario file',
+    })
+    .option('provider', {
+      choices: ['openai', 'anthropic'] as const,
+      default: 'openai',
+      description: 'AI provider to use'
+    })
+    .help()
+    .argv as { [x: string]: unknown; "scenario-file": string | undefined; scenarioFile: string | undefined; provider: "openai" | "anthropic"; _: (string | number)[]; $0: string; };
+
+  const provider = argv.provider;
+  const apiKeyEnvVar = provider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY';
+  const apiKey = process.env[apiKeyEnvVar];
+
+  if (!apiKey) {
+    console.error(`Error: ${apiKeyEnvVar} is not set in the environment variables.`);
+    process.exit(1);
+  }
+
   // Create bot instance
   const bot = new Bot<BotContext>(process.env.TELEGRAM_BOT_TOKEN || "");
 
-  const aiClient = new DefaultAIClient(process.env.ANTHROPIC_API_KEY || "", "anthropic");
+  const aiClient = new DefaultAIClient(apiKey, provider);
   const chatService = new ChatService(aiClient);
 
   // Helper function to generate hash for scenario state
@@ -187,15 +210,6 @@ export async function botStart(): Promise<void> {
     ctx.session.roleAssignments.set(player.id, player);
     await reply(ctx, `@${ctx.from?.username} is now ${name} (${role})`);
   });
-
-  // Parse command-line arguments
-  const argv = yargs(hideBin(process.argv))
-    .option('scenario-file', {
-      type: 'string',
-      description: 'Path to the scenario file',
-    })
-    .help()
-    .argv;
 
   // Load scenario from file if provided
   let preloadedScenario: string | undefined = undefined;

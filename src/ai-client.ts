@@ -6,7 +6,7 @@ export type { ChatCompletionMessageParam };
 
 export type ProviderType = "openai" | "anthropic";
 
-const OPENAI_MODEL = "o1";
+const OPENAI_MODEL = "o3";
 const ANTHROPIC_MODEL = "claude-3-7-sonnet-20250219";
 
 export interface IAIClient {
