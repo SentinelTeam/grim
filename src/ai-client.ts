@@ -62,25 +62,77 @@ export class DefaultAIClient implements IAIClient {
     } else {
       return {
         model: OPENAI_MODEL,
-        reasoning_effort: 'high'
+        reasoning: {
+          effort: 'high'
+        }
       };
     }
   }
 
-  async logAndCreateChatCompletion(params: ChatCompletionCreateParamsNonStreaming): Promise<ChatCompletion> {
-    logger.debug(`Requesting completion from ${this.provider}`, { params });
+  async logAndCreateChatCompletion(
+    params: ChatCompletionCreateParamsNonStreaming
+  ): Promise<ChatCompletion> {
+    logger.debug(`Requesting completion (responses API) from ${this.provider}`, { params });
 
     try {
-      const completion = await this.client.chat.completions.create({
-        ...params,
-        stream: false,
-        seed: this.seed
-      });
+      // Extract messages if provided in "chat" style and remap to the `input` field.
+      const { messages, tools: existingTools = [], ...rest } = params;
 
-      logger.debug(`${this.provider} completion response`, { completion });
-      return completion as ChatCompletion;
+      // Inject the web‑search tool on every call (avoid duplicates).
+      const webSearchTool = { type: "web_search_preview" } as const;
+      const tools = [...existingTools, webSearchTool];
+
+      const responseParams: any = {
+        ...rest,
+        tools,
+        stream: false,
+        seed: this.seed,
+        // Prefer messages if supplied, otherwise allow callers to specify `input` directly.
+        input: messages ?? (rest as any).input,
+      };
+
+      // Remove the legacy field if present to avoid API validation errors.
+      delete responseParams.messages;
+
+      const res: any = await (this.client as any).responses.create(responseParams);
+
+      logger.debug(`${this.provider} responses API result`, { res });
+
+      // Convert the Responses API structure back to a ChatCompletion‑like object.
+      const toolCalls = (res.output || [])
+        .filter((item: any) => item.type === "tool_call")
+        .map((item: any) => ({
+          id: item.id,
+          type: "function",
+          function: {
+            name: item.name,
+            // Ensure arguments are a JSON string to match previous behaviour.
+            arguments: JSON.stringify(item.arguments ?? {})
+          }
+        }));
+
+      const assistantMessages = (res.output || []).filter((item: any) => item.type === "message");
+      const lastAssistant = assistantMessages[assistantMessages.length - 1] || {};
+
+      const pseudoChatCompletion = {
+        id: res.id,
+        choices: [
+          {
+            index: 0,
+            finish_reason: res.finish_reason ?? "stop",
+            message: {
+              role: lastAssistant.role ?? "assistant",
+              content: lastAssistant.content ?? res.output_text ?? "",
+              tool_calls: toolCalls.length ? toolCalls : undefined,
+            },
+          },
+        ],
+        usage: res.usage ?? undefined,
+      };
+
+      return pseudoChatCompletion as unknown as ChatCompletion;
     } catch (error) {
-      logger.error(`Error calling ${this.provider} API`, { error });
+      logger.error(`Error calling ${this.provider} responses API`, { error });
       throw error;
     }
   }
