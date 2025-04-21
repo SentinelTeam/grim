@@ -79,13 +79,7 @@ export class ChatService {
         players: players.map(p => ({ name: p.name, role: p.role }))
       });
 
-      const systemPrompt = getInitialPrompt(players);
-
-      // Use same message format for both providers - OpenAI SDK compat layer handles the conversion
-      const messages: ChatCompletionMessageParam[] = [
-        { role: "developer", content: systemPrompt },
-        { role: "user", content: scenario }
-      ];
+      const instructions = getInitialPrompt(players);
 
       logger.debug(`Sending initial prompt to ${this.aiClient.getProvider()}`, {
         messageLength: scenario.length
@@ -94,20 +88,19 @@ export class ChatService {
       const modelParams = this.aiClient.getSmartestModelParams();
       const params: any = {
         ...modelParams,
-        messages,
+        instructions,
+        input: scenario
       };
 
-      const completion = await this.aiClient.logAndCreateChatCompletion(params);
+      const response = await this.aiClient.logAndCreateChatCompletion(params);
 
-      const response = completion.choices[0].message.content || "Failed to generate scenario";
+      const assistantContent = response.output.find(item => item.type === "message")?.content.find(item => item.type === "output_text")?.text || "Failed to generate scenario";
 
-      logger.info("Scenario initialized successfully", {
-        responseLength: response.length
-      });
+      logger.info("Scenario initialized successfully");
 
       return [
         { role: "user", content: scenario },
-        { role: "assistant", content: response }
+        { role: "assistant", content: assistantContent }
       ];
     } catch (error) {
       logger.error("Failed to initialize scenario", {

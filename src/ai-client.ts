@@ -71,7 +71,6 @@ export class DefaultAIClient implements IAIClient {
   async logAndCreateChatCompletion(
     params: ResponseCreateParamsNonStreaming
   ): Promise<Response> {
-    logger.debug(`Requesting completion (responses API) from ${this.provider}`, { params });
 
     try {
       const webSearchTool = { type: "web_search_preview" };
@@ -80,15 +79,16 @@ export class DefaultAIClient implements IAIClient {
       const expandedParams: ResponseCreateParamsNonStreaming = {
         ...params,
         tools,
+        // tool_choice: "required",
         stream: false,
         seed: this.seed,
       };
 
-      const res: any = await this.client.responses.create(expandedParams);
+      logger.debug(`Requesting completion (responses API) from ${this.provider}`, { params: expandedParams });
+      const response: any = await this.client.responses.create(expandedParams);
+      logger.debug(`${this.provider} responses API result`, { response });
 
-      logger.debug(`${this.provider} responses API result`, { res });
-
-      return res;
+      return response;
     } catch (error) {
       logger.error(`Error calling ${this.provider} responses API`, { error });
       throw error;
