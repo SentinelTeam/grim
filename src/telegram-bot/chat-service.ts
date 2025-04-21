@@ -158,9 +158,8 @@ When providing outcomes for actions, at the very least consider the following:
         tool_choice: "required" as const,
         tools: [{
           type: "function" as const,
-          function: {
-            name: "sample_from_weighted_outcomes",
-            description: "Randomly selects an outcome from a weighted list of possibilities",
+          name: "sample_from_weighted_outcomes",
+          description: "Randomly selects an outcome from a weighted list of possibilities",
             parameters: {
               type: "object",
               properties: {
@@ -184,7 +183,6 @@ When providing outcomes for actions, at the very least consider the following:
               },
               required: ["outcomes"]
             }
-          }
         }],
       };
 
@@ -215,27 +213,38 @@ ${action.type} ${action.player.name}: ${action.content}`
           contextAndTargetMessage
         ];
 
-        const completion = await this.aiClient.logAndCreateChatCompletion({
+        const response = await this.aiClient.logAndCreateChatCompletion({
           ...forecastConfig,
-          messages
+          input: messages
         });
 
-        const forecasterResponse = completion.choices[0].message;
+        // Find a function_call output or an assistant message with tool_calls
+        const functionCallItem = response.output.find((item: any) => item.type === "function_call");
 
-        if (!forecasterResponse.tool_calls?.[0]) {
-          logger.error("No tool call received when required", { forecasterResponse });
+        let outcomes: Outcome[] | undefined;
+
+        if (functionCallItem) {
+          try {
+            const args = JSON.parse(functionCallItem.arguments);
+            outcomes = args.outcomes;
+          } catch (err) {
+            logger.error("Failed to parse function_call arguments", { err, functionCallItem });
+          }
+        } else {
+          logger.error("No function_call received when tool_choice is required", { response });
+        }
+
+        if (!outcomes) {
+          logger.error("No tool call received when required", { response });
           return null;
         }
 
-        const toolCall = forecasterResponse.tool_calls[0];
-        const args = JSON.parse(toolCall.function.arguments);
-        const { outcomes } = args;
         const outcome = sampleFromWeightedOutcomes(outcomes);
 
         logger.debug("Sampled outcome for action", {
           action: `${action.type} ${action.player.name}: ${action.content}`,
           outcome,
-          numOutcomes: outcomes.length
+          numOutcomes: outcomes!.length
         });
 
         return `${action.type} ${action.player.name}: ${action.content}\nOutcome: ${outcome}`;
@@ -293,12 +302,13 @@ Your response should be in the following format:
 
       const params: any = {
         ...this.aiClient.getSmartestModelParams(),
-        messages: narratorMessages,
+        input: narratorMessages,
       };
 
       const narratorCompletion = await this.aiClient.logAndCreateChatCompletion(params);
 
-      const narratorResponse = narratorCompletion.choices[0].message.content || "Failed to generate narrative";
+      const narratorMessageItem = narratorCompletion.output.find((item: any) => item.type === "message");
+      const narratorResponse = narratorMessageItem?.content?.find((c: any) => c.type === "output_text")?.text || "Failed to generate narrative";
 
       logger.info("Narrator generated story update", {
         responseLength: narratorResponse.length
